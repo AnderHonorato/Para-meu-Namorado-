@@ -1775,26 +1775,16 @@ function fechaPainel() { painel.classList.remove('on'); btnSom.setAttribute('ari
 btnSom.addEventListener('click', e => { e.stopPropagation(); const on = !painel.classList.contains('on'); painel.classList.toggle('on', on); btnSom.setAttribute('aria-expanded', on); atualizaBotaoSom(); });
 document.addEventListener('pointerdown', e => { if (painel.classList.contains('on') && !painel.contains(e.target) && !btnSom.contains(e.target)) fechaPainel(); }, true);
 btnCaixinha.addEventListener('click', () => { Som.alterna(); atualizaBotaoSom(); });
-async function salvaParaTodos(url) {
-  let art = null;
-  try { if (window.claude && typeof window.claude.use === 'function') art = await Promise.race([window.claude.use('artifact'), espera(5000).then(() => null)]); } catch (e) { art = null; }
-  if (!art || typeof art.publish !== 'function') return 'local';
-  try {
-    const res = await fetch(location.href, { cache: 'no-store' }); if (!res.ok) return 'local';
-    const html = await res.text();
-    const novo = html.replace(/\/\*MUSIC_LINK\*\/"(?:[^"\\]|\\.)*"/, '/*MUSIC_LINK*/' + JSON.stringify(url));
-    if (novo === html || !/^<!DOCTYPE html>/i.test(novo.trim())) return 'local';
-    await art.publish(novo); return 'todos';
-  } catch (e) { return 'local'; }
+function salvaLocal(url) {
+  try { localStorage.setItem('lil.musica', url); } catch (_) {}
+  montaLinks();
+  aviso('salvo neste aparelho 💛', 3000);
 }
-$('#form-link').addEventListener('submit', async e => {
+$('#form-link').addEventListener('submit', e => {
   e.preventDefault();
   const v = $('#campo-link').value.trim();
   if (!/^https?:\/\/[^\s]+\.[^\s]+/i.test(v)) { aviso('esse link não parece válido'); return; }
-  try { localStorage.setItem('lil.musica', v); } catch (_) { }
-  montaLinks(); aviso('salvando…', 1500);
-  const r = await salvaParaTodos(v);
-  if (r === 'todos') { LINK_MUSICA = v; aviso('salvo pra quem abrir o site 💛', 3500); } else aviso('salvo neste aparelho 💛', 3000);
+  salvaLocal(v);
 });
 montaLinks();
 
