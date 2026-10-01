@@ -1531,6 +1531,7 @@ function quadro(agora) {
   }
   camera.position.lerp(camAlvo, 1 - Math.exp(-dt * (estado === 'bau' ? 3 : 5)));
   olharSuave.lerp(olharAlvo, 1 - Math.exp(-dt * 3.2));
+  atualizaExpansaoCamera(t, caminhoT, dt);
   camera.lookAt(olharSuave);
   }
   const fovAlvo = modo === 'jogo' ? (camera.aspect < .8 ? 64 : 52) : (camera.aspect < .8 ? 66 : 55) + warp * 14 - respiro * 4;
@@ -1576,6 +1577,7 @@ function quadro(agora) {
   bau.chaoBrilho.material.opacity = (.22 + aberto * .5) * (.4 + .6 * noite);
   atualizaSubida();
   atualizaCasa(t, dt, noite);
+  atualizaExpansao(t, dt, uC, dia, noite);
 
   /* ---- estrelas cadentes ---- */
   if ((estado === 'viagem' || estado === 'jogo') && noite > .7 && !warp) { proxCadente -= dt; if (proxCadente <= 0) { novaCadente(); proxCadente = 5 + R() * 7; } }
@@ -2086,6 +2088,55 @@ window.__ceu = {
   abrir: abrirBau, estado: () => estado, modo: () => modo, u: () => caminhoT, jog: () => ({ s: jog.s, u: jog.u, cor: jog.cor, fotos: jog.fotos, estado }),
   premio: () => mostraPremio(), pausa(v) { pausado = v; }, pronto: () => polaroidsProntos
 };
+
+/* =========================================================
+   EXPANSÃO DE GAMEPLAY — pontos de interesse e set pieces
+   ========================================================= */
+const EXP = { spots: [], interact: [], rain: null, storm: null, umbrella: null, active: null, once: new Set(), focus: 0 };
+const expMat = (color, rough=.75, metal=0) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
+function expMesh(geo, mat, parent, pos, scale) { const m = new THREE.Mesh(geo, mat); if (pos) m.position.copy(pos); if (scale) m.scale.copy(scale); parent.add(m); return m; }
+function expPath(group, u, lat=0, y=0) { ponto(frac(u), _p); lado(frac(u), _n); group.position.set(_p.x + _n.x * lat, _p.y + y, _p.z + _n.z * lat); curva.getTangentAt(frac(u), _t); group.rotation.y = Math.atan2(_t.x, _t.z); return group; }
+function expLabel(text, color='#ffe0a2') { const c=document.createElement('canvas'); c.width=620; c.height=100; const x=c.getContext('2d'); x.fillStyle='rgba(15,20,51,.86)'; x.roundRect(4,4,612,92,20); x.fill(); x.font='600 28px system-ui'; x.fillStyle=color; x.textAlign='center'; x.textBaseline='middle'; x.fillText(text,310,52); const s=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),transparent:true,depthTest:false})); s.scale.set(4.4,.72,1); s.position.y=3.1; return s; }
+function expSpot(name,u,group,opts={}) { expPath(group,u,opts.lat||0,opts.y||0); group.userData.exp={name,u,look:opts.look||group.position.clone().add(V(0,1.4,0)),action:opts.action}; cena.add(group); EXP.spots.push(group); return group; }
+function makeBench(){ const g=new THREE.Group(), wood=expMat(0x8e523d), dark=expMat(0x33253a); expMesh(new THREE.BoxGeometry(2.4,.18,.46),wood,g,V(0,1.05,0)); expMesh(new THREE.BoxGeometry(2.4,.16,.38),wood,g,V(0,.55,0)); for(const x of [-.85,.85]) expMesh(new THREE.BoxGeometry(.14,1.1,.34),dark,g,V(x,.5,0)); g.add(expLabel('um lugar para ficar')); return g; }
+function makeBridge(){ const g=new THREE.Group(), wood=expMat(0x9f694d), rail=expMat(0xd4a26b); expMesh(new THREE.BoxGeometry(5.3,.22,2.1),wood,g,V(0,.7,0)); for(const x of [-2.2,2.2]){ expMesh(new THREE.BoxGeometry(.18,1.1,.18),rail,g,V(x,1.15,-.78)); expMesh(new THREE.BoxGeometry(.18,1.1,.18),rail,g,V(x,1.15,.78)); } expMesh(new THREE.BoxGeometry(4.6,.12,.12),rail,g,V(0,1.6,-.78)); expMesh(new THREE.BoxGeometry(4.6,.12,.12),rail,g,V(0,1.6,.78)); const water=expMesh(new THREE.PlaneGeometry(8,5),new THREE.MeshStandardMaterial({color:0x4ca7ba,transparent:true,opacity:.7,roughness:.2}),g,V(0,.05,0)); water.rotation.x=-Math.PI/2; g.add(expLabel('riacho das promessas')); return g; }
+function makeSweetShop(){ const g=new THREE.Group(), wall=expMat(0xf2a16d), trim=expMat(0x5e3156), glass=new THREE.MeshStandardMaterial({color:0x8ce0df,transparent:true,opacity:.55,roughness:.1}); expMesh(new THREE.BoxGeometry(3.4,2.2,2.4),wall,g,V(0,1.1,0)); const roof=expMesh(new THREE.ConeGeometry(2.5,1.2,4),trim,g,V(0,2.8,0)); roof.rotation.y=Math.PI/4; expMesh(new THREE.BoxGeometry(2.6,.9,.12),glass,g,V(0,1.35,-1.22)); for(let i=0;i<5;i++){ const candy=expMesh(new THREE.SphereGeometry(.18,10,8),expMat([0xff6f91,0xffd166,0x7dd3c7,0xc7a0ff][i%4],.4),g,V(-.9+i*.45,1.38,-1.38)); candy.scale.y=.65; } g.add(expLabel('lojinha do depois')); return g; }
+function makeFireCamp(){ const g=new THREE.Group(), rock=expMat(0x646679), log=expMat(0x754735), ember=expMat(0xff7a38,.25,.1); for(let i=0;i<7;i++){ const a=i*Math.PI*2/7; expMesh(new THREE.DodecahedronGeometry(.28,0),rock,g,V(Math.cos(a)*.95,.2,Math.sin(a)*.95)); } for(let i=0;i<3;i++){ const l=expMesh(new THREE.CylinderGeometry(.12,.15,1.7,8),log,g,V(0,.45,0)); l.rotation.z=Math.PI/2; l.rotation.y=i*1.1; } const fire=expMesh(new THREE.IcosahedronGeometry(.42,1),ember,g,V(0,1.05,0)); fire.userData.fire=true; g.userData.fire=fire; const tent=expMesh(new THREE.ConeGeometry(1.55,2.1,3),expMat(0xe2b36c),g,V(2.2,1.05,0)); tent.rotation.y=Math.PI/2; g.add(expLabel('fogueira + cabana')); return g; }
+function makeBinocular(){ const g=new THREE.Group(), metal=expMat(0x94a5b8,.3,.7), rubber=expMat(0x273148); expMesh(new THREE.CylinderGeometry(.18,.18,1.1,12),rubber,g,V(0,1.45,0)); for(const x of [-.32,.32]){ const tube=expMesh(new THREE.CylinderGeometry(.23,.18,.75,16),metal,g,V(x,1.85,-.1)); tube.rotation.x=Math.PI/2; expMesh(new THREE.CylinderGeometry(.26,.26,.08,16),rubber,g,V(x,1.85,-.48)).rotation.x=Math.PI/2; } expMesh(new THREE.BoxGeometry(.75,.12,.65),metal,g,V(0,1.3,0)); g.add(expLabel('binóculo · datas que se encontraram')); return g; }
+function makeRail(){ const g=new THREE.Group(), railMat=expMat(0x7e8fb5,.35,.6), wood=expMat(0x4b3a62); const pts=[V(-5,0,0),V(-3,7,-2),V(0,12,0),V(3,9,3),V(5,2,0),V(7,0,-2)]; const path=new THREE.CatmullRomCurve3(pts); for(const z of [-.35,.35]){ const p=pts.map(v=>V(v.x,v.y,v.z+z)); const rail=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(p),28,.055,8,false),railMat); g.add(rail); } for(let i=0;i<7;i++) expMesh(new THREE.BoxGeometry(.18,.15,.95),wood,g,V(-5+i*2, [0,7,12,9,2,0,0][Math.min(i,6)],0)); g.add(expLabel('montanha-russa do céu')); return g; }
+function makeCats(){ const g=new THREE.Group(), fur=expMat(0xf0c18f), dark=expMat(0x47334c); for(let i=0;i<3;i++){ const c=new THREE.Group(); expMesh(new THREE.SphereGeometry(.38,12,10),fur,c,V(0,.48,0)); expMesh(new THREE.ConeGeometry(.18,.35,4),fur,c,V(-.22,.82,0)); expMesh(new THREE.ConeGeometry(.18,.35,4),fur,c,V(.22,.82,0)); const eye=expMesh(new THREE.SphereGeometry(.045,8,6),dark,c,V(-.13,.55,-.34)); expMesh(new THREE.SphereGeometry(.045,8,6),dark,c,V(.13,.55,-.34)); c.position.x=(i-1)*.9; c.position.z=(i%2)*.55; c.userData.phase=i*.7; g.add(c); } g.add(expLabel('os gatos chegaram primeiro')); return g; }
+function makeStorm(){ const g=new THREE.Group(), cloudMat=new THREE.MeshStandardMaterial({color:0x39415e,transparent:true,opacity:.85}); for(let i=0;i<7;i++) expMesh(new THREE.SphereGeometry(1.4,12,8),cloudMat,g,V((i-3)*1.7,5+Math.sin(i)*.4,0),V(1.4,.6,1)); const rainN=280, pos=new Float32Array(rainN*3); for(let i=0;i<rainN;i++){pos[i*3]=(Math.random()-.5)*26;pos[i*3+1]=Math.random()*14;pos[i*3+2]=(Math.random()-.5)*18} const rg=new THREE.BufferGeometry();rg.setAttribute('position',new THREE.BufferAttribute(pos,3));const rm=new THREE.PointsMaterial({color:0x9bd9ef,size:.075,transparent:true,opacity:.8});EXP.rain=new THREE.Points(rg,rm);g.add(EXP.rain);g.visible=false; return g; }
+function makeUmbrella(){ const g=new THREE.Group(), cloth=new THREE.MeshBasicMaterial({color:0xff8a67,side:THREE.DoubleSide}); const top=expMesh(new THREE.CircleGeometry(.85,24,0,Math.PI),cloth,g,V(0,2.45,0)); top.rotation.x=-Math.PI/2; expMesh(new THREE.CylinderGeometry(.025,.025,1.8,6),expMat(0x5a3d4f),g,V(0,1.65,0)); g.visible=false; return g; }
+function makePhotoStand(){ const g=new THREE.Group(), frame=expMat(0xe7d3a9), paper=expMat(0xf8edcf); expMesh(new THREE.BoxGeometry(1.4,.09,1),frame,g,V(0,.65,0)); expMesh(new THREE.PlaneGeometry(1.1,.75),new THREE.MeshBasicMaterial({color:0x9bb0bd}),g,V(0,.72,-.05)).rotation.x=-Math.PI/2; expMesh(new THREE.BoxGeometry(.08,.8,.08),frame,g,V(0,.3,0)); g.add(expLabel('memória escondida')); return g; }
+function initExpansao(){
+  const bench=expSpot('banco',.18,makeBench(),{lat:2});
+  const bridge=expSpot('riacho',.31,makeBridge(),{lat:-1});
+  const shop=expSpot('doces',.43,makeSweetShop(),{lat:2});
+  const camp=expSpot('fogueira',.56,makeFireCamp(),{lat:-2});
+  const bino=expSpot('binoculo',.68,makeBinocular(),{lat:2});
+  const rail=expSpot('montanha-russa',.76,makeRail(),{lat:0,y:4,look:V(0,8,0)});
+  const cats=expSpot('gatos',.855,makeCats(),{lat:-1});
+  const storm=expSpot('tempestade',.49,makeStorm(),{lat:0,y:4}); EXP.storm=storm;
+  const photo=expSpot('foto-no-chao',.285,makePhotoStand(),{lat:-2}); photo.userData.exp.action='photo';
+  for(const p of polaroids){ if(p.i%3===1) p.y0=.22; }
+  EXP.interact.push(bench,shop,camp,bino,photo);
+  for(const s of EXP.spots) s.traverse(o=>{if(o.isMesh||o.isSprite)o.userData.expRoot=s});
+}
+function expNear(u, v, radius=.035){ const d=Math.abs(dU(u,v)); return d<radius ? 1-d/radius : 0; }
+function expAction(name){ if(name==='banco') aviso('sentados por um instante. o caminho pode esperar.',2600); else if(name==='doces') aviso('uma bala para a viagem e outra para guardar.',2400); else if(name==='fogueira') aviso('a cabana está pronta. o fogo entende o silêncio.',2600); else if(name==='binoculo'){ aviso('24/08/1997 · Ander  —  03/04/2001 · Lil',3800); escreveComEstrelas('duas datas. uma constelação.'); } else if(name==='foto' && polaroids.length) abreAlbum(polaroids[Math.min(2,polaroids.length-1)]); if(Som&&Som.chime)Som.chime(); }
+function atualizaExpansao(t,dt,u,dia,noite){
+  for(const s of EXP.spots){ const d=expNear(u,s.userData.exp.u,.045); s.userData.expHeat=d; if(s.userData.exp.name==='tempestade')s.visible=d>.05; if(s.userData.exp.name==='tempestade'&&d>.05){ s.position.y+=Math.sin(t*1.4)*dt*.2; EXP.rain.material.opacity=.35+.45*d; const a=EXP.rain.geometry.attributes.position.array; for(let i=1;i<a.length;i+=3){a[i]-=dt*(9+8*d);if(a[i]<0)a[i]=12+Math.random()*4}EXP.rain.geometry.attributes.position.needsUpdate=true; } }
+  const focus=EXP.spots.reduce((best,s)=>s.userData.expHeat>best.heat?{spot:s,heat:s.userData.expHeat}:best,{spot:null,heat:0}); EXP.active=focus.spot; EXP.focus+=(focus.heat-EXP.focus)*(1-Math.exp(-dt*3));
+  if(EXP.active&&EXP.active.userData.exp.name==='montanha-russa'){ camera.position.y+=Math.sin(t*2.4)*dt*1.2; camera.rotation.z=Math.sin(t*1.7)*.025; }
+  else camera.rotation.z*=Math.exp(-dt*4);
+  const fire=EXP.spots.find(s=>s.userData.exp.name==='fogueira'); if(fire?.userData.fire) fire.userData.fire.scale.setScalar(1+.12*Math.sin(t*8));
+  const cats=EXP.spots.find(s=>s.userData.exp.name==='gatos'); if(cats)cats.children.forEach(c=>{if(c.userData.phase!==undefined)c.position.y=Math.max(0,Math.sin(t*4+c.userData.phase))*EXPNear(u,.855,.055)*.45});
+  if(modo==='jogo'&&jog.av){ if(!jog.av.userData.umbrella){jog.av.userData.umbrella=makeUmbrella();jog.av.add(jog.av.userData.umbrella)} const wet=expNear(u,.49,.065)>.1||expNear(u,.56,.045)>.1; jog.av.userData.umbrella.visible=wet; if(wet&&!EXP.once.has('rain')){EXP.once.add('rain');aviso('a chuva apertou. vem, eu te protejo.',2400)} const p=wet?Math.sin(t*2)*.15:0; jog.av.userData.bE.rotation.x=-1.6+p; jog.av.userData.bD.rotation.x=-1.4-p; }
+}
+function EXPNear(u,v,r){return expNear(u,v,r)}
+function atualizaExpansaoCamera(t,u,dt){ if(modo!=='auto'||!EXP.active)return; const e=EXP.active.userData.exp; const heat=EXP.focus; if(heat>.1){ const target=e.look.clone(); olharAlvo.lerp(target,heat*.16); camAlvo.y+=heat*(e.name==='montanha-russa'?5:1.2); camera.fov+=( (e.name==='montanha-russa'?67:58) - camera.fov )*Math.min(.04,dt*2); } }
+function expPointer(e){ if(!EXP.interact.length)return; const r=gl.getBoundingClientRect(); ndc.x=((e.clientX-r.left)/r.width)*2-1;ndc.y=-((e.clientY-r.top)/r.height)*2+1;raycaster.setFromCamera(ndc,camera);const hits=raycaster.intersectObjects(EXP.interact,true);if(hits.length){let o=hits[0].object;while(o&&!o.userData.expRoot)o=o.parent;const root=o?.userData.expRoot||hits[0].object; if(root?.userData.exp)expAction(root.userData.exp.name);}}
+initExpansao(); gl.addEventListener('pointerup',expPointer);
 
 })();
 
